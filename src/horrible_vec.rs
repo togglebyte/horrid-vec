@@ -4,9 +4,11 @@ use std::mem::{align_of, size_of};
 use std::ops::Index;
 use std::ptr;
 
+/// This data struct will leak memory if the insert
+/// function is ever used
 #[derive(Debug)]
 pub struct HorridVec<T: fmt::Debug> {
-    inner: *mut T, // to get T at an index: get inner.offset(index).read() -> T
+    start: *mut T, // to get T at an index: get start.offset(index).read() -> T
     offset: isize,
     len: usize,
     capacity: usize,
@@ -26,7 +28,7 @@ impl<T: fmt::Debug> HorridVec<T> {
             let start = mem.cast::<T>();
 
             Self {
-                inner: start,
+                start,
                 len: 0,
                 offset: 0,
                 capacity,
@@ -34,9 +36,23 @@ impl<T: fmt::Debug> HorridVec<T> {
         }
     }
 
+    /// Suuuuper unsafe.
+    /// If an entry is inserted at an index > len then 
+    /// it will leak the memory that as inserted.
+    pub fn insert(&mut self, index: usize, val: T) {
+        if index >= self.capacity {
+            panic!("trying to insert value outside of allocated memory");
+        }
+
+        unsafe {
+            let offset = self.start.offset(index as isize);
+            ptr::write(offset, val);
+        }
+    }
+
     pub fn push(&mut self, val: T) {
         unsafe {
-            let offset = self.inner.offset(self.len as isize);
+            let offset = self.start.offset(self.len as isize);
             ptr::write(offset, val);
             self.len += 1;
         }
@@ -49,7 +65,7 @@ impl<T: fmt::Debug> HorridVec<T> {
 
         unsafe {
             self.len -= 1;
-            let offset = self.inner.offset(self.len as isize);
+            let offset = self.start.offset(self.len as isize);
             match offset.is_null() {
                 true => None,
                 false => Some(offset.read()),
@@ -64,14 +80,15 @@ impl<T: fmt::Debug> HorridVec<T> {
         }
     }
 
-    pub unsafe fn get(&self, index: usize) -> Option<T> {
+    pub unsafe fn get(&self, index: usize) -> Option<&T> {
         if index > self.len {
             return None;
         }
-        let offset = self.inner.offset(index as isize);
+
+        let offset = self.start.offset(index as isize);
         match offset.is_null() {
             true => None,
-            false => Some(offset.read()),
+            false => offset.as_ref(),
         }
     }
 }
@@ -79,7 +96,7 @@ impl<T: fmt::Debug> HorridVec<T> {
 impl<T: fmt::Debug> Drop for HorridVec<T> {
     fn drop(&mut self) {
         while let Some(_) = self.pop() {}
-        let start = self.inner.cast::<u8>();
+        let start = self.start.cast::<u8>();
         unsafe {
             dealloc(
                 start,
@@ -97,7 +114,7 @@ impl<T: fmt::Debug> Index<usize> for HorridVec<T> {
             if index > self.len {
                 panic!("omg what are you doing!");
             }
-            let offset = self.inner.offset(index as isize);
+            let offset = self.start.offset(index as isize);
             offset.as_ref().unwrap()
         }
     }
@@ -114,7 +131,7 @@ impl<T: fmt::Debug> HorridIterator<T> {
             return None;
         }
 
-        let val = self.vec.inner.offset(self.vec.offset).read();
+        let val = self.vec.start.offset(self.vec.offset).read();
         self.vec.len -= 1;
         self.vec.offset += 1;
         Some(val)

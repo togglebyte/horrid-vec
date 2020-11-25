@@ -33,7 +33,7 @@ pub unsafe fn unsafe_main() {
     vec.push(person_1);
     vec.push(person_2);
 
-    for val in vec.into_iter() {
+    for _val in vec.into_iter() {
         // eprintln!("{:?}", val);
     }
 }
